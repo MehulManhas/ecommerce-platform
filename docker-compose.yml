@@ -1,0 +1,25 @@
+# Infrastructure for local development.
+# Phase 1 (monorepo migration) ships Postgres only, since the services are not
+# containerised yet. Redis, Kafka and the service containers are added in the
+# "Dockerize + deployment" step.
+services:
+  postgres:
+    image: postgres:16
+    container_name: ecommerce-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ECommerceDB
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ECommerceDB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+
