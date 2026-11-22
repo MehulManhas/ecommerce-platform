@@ -1,0 +1,340 @@
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..1a2d5e7
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,7 @@
++**/target/
++.git/
++.gitignore
++.idea/
++*.iml
++.vscode/
++*.log
+diff --git a/api-gateway/Dockerfile b/api-gateway/Dockerfile
+new file mode 100644
+index 0000000..e5e9af9
+--- /dev/null
++++ b/api-gateway/Dockerfile
+@@ -0,0 +1,12 @@
++# Build stage — JDK 17 base (compatible with the project's Lombok version)
++FROM maven:3.9-eclipse-temurin-17 AS build
++WORKDIR /workspace
++COPY . .
++RUN mvn -q -B -pl api-gateway -am -DskipTests clean package
++
++# Runtime stage
++FROM eclipse-temurin:17-jre
++WORKDIR /app
++COPY --from=build /workspace/api-gateway/target/*.jar app.jar
++EXPOSE 8080
++ENTRYPOINT ["java", "-jar", "app.jar"]
+diff --git a/api-gateway/src/main/resources/application.yml b/api-gateway/src/main/resources/application.yml
+index 8152e8f..0269905 100644
+--- a/api-gateway/src/main/resources/application.yml
++++ b/api-gateway/src/main/resources/application.yml
+@@ -8,19 +8,19 @@ spring:
+     gateway:
+       routes:
+         - id: user-service
+-          uri: http://localhost:8081
++          uri: ${USERSERVICE_URI:http://localhost:8081}
+           predicates:
+             - Path=/api/auth/**,/api/roles/**,/api/users/**
+           filters:
+             - RewritePath=/api/(?<segment>.*), /$\{segment}
+         - id: product-service
+-          uri: http://localhost:9090
++          uri: ${PRODUCTSERVICE_URI:http://localhost:9090}
+           predicates:
+             - Path=/api/products/**
+           filters:
+             - RewritePath=/api/(?<segment>.*), /$\{segment}
+         - id: order-service
+-          uri: http://localhost:9091
++          uri: ${ORDERSERVICE_URI:http://localhost:9091}
+           predicates:
+             - Path=/api/orders/**
+           filters:
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 83d10c4..d1ad1b4 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -1,7 +1,7 @@
+-# Infrastructure for local development.
+-# Phase 1 (monorepo migration) ships Postgres only, since the services are not
+-# containerised yet. Redis, Kafka and the service containers are added in the
+-# "Dockerize + deployment" step.
++# Full local stack: infrastructure + all four services.
++#   docker compose up -d --build
++# Host access: Postgres :5432, Redis :6379, Kafka :9092, gateway :8080.
++# Services talk to each other and to Kafka (kafka:29092) over the compose network.
+ services:
+   postgres:
+     image: postgres:16
+@@ -31,9 +31,8 @@ services:
+       timeout: 5s
+       retries: 5
+ 
+-  # Single-node Kafka (KRaft mode, no ZooKeeper). advertised listener is localhost
+-  # because the services currently run on the host; Phase 6 adjusts this when the
+-  # services move into containers.
++  # Single-node Kafka (KRaft). Two listeners: INTERNAL (kafka:29092) for the
++  # compose services, EXTERNAL (localhost:9092) for clients on the host.
+   kafka:
+     image: apache/kafka:3.7.0
+     container_name: ecommerce-kafka
+@@ -42,16 +41,88 @@ services:
+     environment:
+       KAFKA_NODE_ID: 1
+       KAFKA_PROCESS_ROLES: broker,controller
+-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
++      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9092
++      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
++      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
++      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
++      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:29093
+       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+ 
++  user-service:
++    build:
++      context: .
++      dockerfile: user-service/Dockerfile
++    container_name: ecommerce-user-service
++    environment:
++      SPRING_PROFILES_ACTIVE: docker
++    ports:
++      - "8081:8081"
++    depends_on:
++      postgres:
++        condition: service_healthy
++      kafka:
++        condition: service_started
++
++  product-service:
++    build:
++      context: .
++      dockerfile: product-service/Dockerfile
++    container_name: ecommerce-product-service
++    environment:
++      SPRING_PROFILES_ACTIVE: docker
++    ports:
++      - "9090:9090"
++    depends_on:
++      postgres:
++        condition: service_healthy
++      redis:
++        condition: service_healthy
++      kafka:
++        condition: service_started
++      user-service:
++        condition: service_started
++
++  order-service:
++    build:
++      context: .
++      dockerfile: order-service/Dockerfile
++    container_name: ecommerce-order-service
++    environment:
++      SPRING_PROFILES_ACTIVE: docker
++    ports:
++      - "9091:9091"
++    depends_on:
++      postgres:
++        condition: service_healthy
++      kafka:
++        condition: service_started
++      user-service:
++        condition: service_started
++      product-service:
++        condition: service_started
++
++  api-gateway:
++    build:
++      context: .
++      dockerfile: api-gateway/Dockerfile
++    container_name: ecommerce-api-gateway
++    environment:
++      USERSERVICE_URI: http://user-service:8081
++      PRODUCTSERVICE_URI: http://product-service:9090
++      ORDERSERVICE_URI: http://order-service:9091
++    ports:
++      - "8080:8080"
++    depends_on:
++      user-service:
++        condition: service_started
++      product-service:
++        condition: service_started
++      order-service:
++        condition: service_started
++
+ volumes:
+   pgdata:
+-
+diff --git a/docs/deployment-aws.md b/docs/deployment-aws.md
+new file mode 100644
+index 0000000..5831b77
+--- /dev/null
++++ b/docs/deployment-aws.md
+@@ -0,0 +1,69 @@
++# Deployment design (AWS)
++
++How the local `docker-compose` topology maps onto AWS for a production-style
++deployment. This is the design for the report's "Deployment Flow" section; it
++describes the target architecture rather than a provisioned environment.
++
++## Local → AWS mapping
++
++| Local (docker-compose) | AWS service |
++| --- | --- |
++| `postgres` container | **Amazon RDS for PostgreSQL** (Multi-AZ) |
++| `redis` container | **Amazon ElastiCache for Redis** |
++| `kafka` container | **Amazon MSK** (Managed Streaming for Kafka) |
++| service containers | **Amazon ECS (Fargate)** tasks, or EC2 behind an ASG |
++| `api-gateway` | ECS service behind an **Application Load Balancer** |
++| images | **Amazon ECR** |
++
++## Network (VPC)
++
++- One **VPC** spanning **two Availability Zones** for high availability.
++- **Public subnets**: the Application Load Balancer only.
++- **Private subnets**: all service tasks (user, product, order, gateway), plus
++  RDS, ElastiCache and MSK. Nothing data-tier is publicly reachable.
++- **NAT Gateway** in a public subnet for private-subnet outbound (pulling images,
++  patching).
++
++## Security groups (least privilege)
++
++| From | To | Port |
++| --- | --- | --- |
++| Internet | ALB | 80 / 443 |
++| ALB | api-gateway tasks | 8080 |
++| api-gateway | user/product/order tasks | 8081 / 9090 / 9091 |
++| product/order tasks | user-service task | 8081 (token validation) |
++| order-service task | product-service task | 9090 (price lookup) |
++| service tasks | RDS | 5432 |
++| product-service task | ElastiCache | 6379 |
++| service tasks | MSK | 9092 |
++
++The database, cache and broker security groups accept traffic **only** from the
++service security group — never from the internet.
++
++## Configuration & secrets
++
++- Non-secret config via ECS task definition environment variables
++  (`SPRING_PROFILES_ACTIVE=prod`, service URLs, broker endpoints).
++- Secrets (`JWT_SECRET`, DB credentials) in **AWS Secrets Manager** / SSM
++  Parameter Store, injected into tasks at runtime — never baked into images.
++
++## CI/CD (outline)
++
++1. Build & test on push (the Maven multi-module build).
++2. Build one image per service, tag with the commit SHA, push to **ECR**.
++3. Update the ECS service to the new task definition (rolling deployment with
++   health checks; roll back automatically on failed health checks).
++
++## Scaling & resilience
++
++- Each service scales independently via an ECS **service auto-scaling** policy
++  (target CPU / request count).
++- RDS Multi-AZ for failover; ElastiCache replication group; MSK across AZs.
++- Statelessness: services hold no session state in memory (JWT + DB + Redis),
++  so any task can serve any request — horizontal scaling is safe.
++
++## Diagram
++
++See the architecture diagram in the report (draw.io). Tiers top to bottom:
++Internet → ALB (public subnets) → API Gateway → {user, product, order} services
++(private subnets) → {RDS, ElastiCache, MSK} (private subnets).
+diff --git a/order-service/Dockerfile b/order-service/Dockerfile
+new file mode 100644
+index 0000000..2add5f2
+--- /dev/null
++++ b/order-service/Dockerfile
+@@ -0,0 +1,12 @@
++# Build stage — JDK 17 base (compatible with the project's Lombok version)
++FROM maven:3.9-eclipse-temurin-17 AS build
++WORKDIR /workspace
++COPY . .
++RUN mvn -q -B -pl order-service -am -DskipTests clean package
++
++# Runtime stage
++FROM eclipse-temurin:17-jre
++WORKDIR /app
++COPY --from=build /workspace/order-service/target/*.jar app.jar
++EXPOSE 9091
++ENTRYPOINT ["java", "-jar", "app.jar"]
+diff --git a/order-service/src/main/resources/application-docker.properties b/order-service/src/main/resources/application-docker.properties
+new file mode 100644
+index 0000000..015a8dd
+--- /dev/null
++++ b/order-service/src/main/resources/application-docker.properties
+@@ -0,0 +1,5 @@
++# Overrides active under the "docker" profile
++spring.datasource.url=jdbc:postgresql://postgres:5432/ECommerceDB
++spring.kafka.bootstrap-servers=kafka:29092
++userservice.base-url=http://user-service:8081
++productservice.base-url=http://product-service:9090
+diff --git a/product-service/Dockerfile b/product-service/Dockerfile
+new file mode 100644
+index 0000000..9229690
+--- /dev/null
++++ b/product-service/Dockerfile
+@@ -0,0 +1,12 @@
++# Build stage — JDK 17 base (compatible with the project's Lombok version)
++FROM maven:3.9-eclipse-temurin-17 AS build
++WORKDIR /workspace
++COPY . .
++RUN mvn -q -B -pl product-service -am -DskipTests clean package
++
++# Runtime stage
++FROM eclipse-temurin:17-jre
++WORKDIR /app
++COPY --from=build /workspace/product-service/target/*.jar app.jar
++EXPOSE 9090
++ENTRYPOINT ["java", "-jar", "app.jar"]
+diff --git a/product-service/src/main/resources/application-docker.properties b/product-service/src/main/resources/application-docker.properties
+new file mode 100644
+index 0000000..8e64e68
+--- /dev/null
++++ b/product-service/src/main/resources/application-docker.properties
+@@ -0,0 +1,5 @@
++# Overrides active under the "docker" profile
++spring.datasource.url=jdbc:postgresql://postgres:5432/ECommerceDB
++spring.data.redis.host=redis
++spring.kafka.bootstrap-servers=kafka:29092
++userservice.base-url=http://user-service:8081
+diff --git a/user-service/Dockerfile b/user-service/Dockerfile
+new file mode 100644
+index 0000000..fcec5d4
+--- /dev/null
++++ b/user-service/Dockerfile
+@@ -0,0 +1,12 @@
++# Build stage — JDK 17 base (compatible with the project's Lombok version)
++FROM maven:3.9-eclipse-temurin-17 AS build
++WORKDIR /workspace
++COPY . .
++RUN mvn -q -B -pl user-service -am -DskipTests clean package
++
++# Runtime stage
++FROM eclipse-temurin:17-jre
++WORKDIR /app
++COPY --from=build /workspace/user-service/target/*.jar app.jar
++EXPOSE 8081
++ENTRYPOINT ["java", "-jar", "app.jar"]
+diff --git a/user-service/src/main/resources/application-docker.properties b/user-service/src/main/resources/application-docker.properties
+new file mode 100644
+index 0000000..8e0ac58
+--- /dev/null
++++ b/user-service/src/main/resources/application-docker.properties
+@@ -0,0 +1,3 @@
++# Overrides active under the "docker" profile (SPRING_PROFILES_ACTIVE=docker)
++spring.datasource.url=jdbc:postgresql://postgres:5432/ECommerceDB
++spring.kafka.bootstrap-servers=kafka:29092

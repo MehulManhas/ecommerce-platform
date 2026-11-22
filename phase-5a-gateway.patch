@@ -1,0 +1,124 @@
+diff --git a/api-gateway/pom.xml b/api-gateway/pom.xml
+new file mode 100644
+index 0000000..ef3c633
+--- /dev/null
++++ b/api-gateway/pom.xml
+@@ -0,0 +1,35 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project xmlns="http://maven.apache.org/POM/4.0.0"
++         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
++         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
++    <modelVersion>4.0.0</modelVersion>
++
++    <parent>
++        <groupId>com.ecommerceproject</groupId>
++        <artifactId>ecommerce-platform</artifactId>
++        <version>0.0.1-SNAPSHOT</version>
++        <relativePath>../pom.xml</relativePath>
++    </parent>
++
++    <artifactId>api-gateway</artifactId>
++    <name>api-gateway</name>
++    <description>Spring Cloud Gateway - single entry point for the platform</description>
++
++    <dependencies>
++        <!-- Reactive gateway; do NOT add spring-boot-starter-web here (servlet stack conflicts). -->
++        <dependency>
++            <groupId>org.springframework.cloud</groupId>
++            <artifactId>spring-cloud-starter-gateway</artifactId>
++        </dependency>
++    </dependencies>
++
++    <build>
++        <plugins>
++            <plugin>
++                <groupId>org.springframework.boot</groupId>
++                <artifactId>spring-boot-maven-plugin</artifactId>
++            </plugin>
++        </plugins>
++    </build>
++
++</project>
+diff --git a/api-gateway/src/main/java/com/ecommerceproject/ApiGateway/ApiGatewayApplication.java b/api-gateway/src/main/java/com/ecommerceproject/ApiGateway/ApiGatewayApplication.java
+new file mode 100644
+index 0000000..ae477bb
+--- /dev/null
++++ b/api-gateway/src/main/java/com/ecommerceproject/ApiGateway/ApiGatewayApplication.java
+@@ -0,0 +1,11 @@
++package com.ecommerceproject.ApiGateway;
++
++import org.springframework.boot.SpringApplication;
++import org.springframework.boot.autoconfigure.SpringBootApplication;
++
++@SpringBootApplication
++public class ApiGatewayApplication {
++    public static void main(String[] args) {
++        SpringApplication.run(ApiGatewayApplication.class, args);
++    }
++}
+diff --git a/api-gateway/src/main/resources/application.yml b/api-gateway/src/main/resources/application.yml
+new file mode 100644
+index 0000000..8152e8f
+--- /dev/null
++++ b/api-gateway/src/main/resources/application.yml
+@@ -0,0 +1,27 @@
++server:
++  port: 8080
++
++spring:
++  application:
++    name: api-gateway
++  cloud:
++    gateway:
++      routes:
++        - id: user-service
++          uri: http://localhost:8081
++          predicates:
++            - Path=/api/auth/**,/api/roles/**,/api/users/**
++          filters:
++            - RewritePath=/api/(?<segment>.*), /$\{segment}
++        - id: product-service
++          uri: http://localhost:9090
++          predicates:
++            - Path=/api/products/**
++          filters:
++            - RewritePath=/api/(?<segment>.*), /$\{segment}
++        - id: order-service
++          uri: http://localhost:9091
++          predicates:
++            - Path=/api/orders/**
++          filters:
++            - RewritePath=/api/(?<segment>.*), /$\{segment}
+diff --git a/pom.xml b/pom.xml
+index e9e064e..f10daf6 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -23,13 +23,27 @@
+     <properties>
+         <java.version>17</java.version>
+         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
++        <spring-cloud.version>2023.0.1</spring-cloud.version>
+     </properties>
+ 
+-    <!-- Aggregated modules. New services (common, gateway, order-service) get added here. -->
++    <dependencyManagement>
++        <dependencies>
++            <dependency>
++                <groupId>org.springframework.cloud</groupId>
++                <artifactId>spring-cloud-dependencies</artifactId>
++                <version>${spring-cloud.version}</version>
++                <type>pom</type>
++                <scope>import</scope>
++            </dependency>
++        </dependencies>
++    </dependencyManagement>
++
++    <!-- Aggregated modules. -->
+     <modules>
+         <module>common</module>
+         <module>user-service</module>
+         <module>product-service</module>
++        <module>api-gateway</module>
+     </modules>
+ 
+ </project>
