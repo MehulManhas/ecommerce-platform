@@ -1,5 +1,6 @@
 package com.ecommerceproject.UserService.Service;
 
+import com.ecommerceproject.UserService.Dto.LoginResponseDto;
 import com.ecommerceproject.UserService.Dto.UserDto;
 import com.ecommerceproject.UserService.Exception.InvalidCredentialException;
 import com.ecommerceproject.UserService.Exception.InvalidSessionLogoutException;
@@ -55,7 +56,7 @@ public class AuthService {
         this.jwtKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
     }
 
-    public ResponseEntity<UserDto> login(String email, String password) {
+    public ResponseEntity<LoginResponseDto> login(String email, String password) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User not found in the database"));
 
@@ -87,12 +88,12 @@ public class AuthService {
         session.setLogInAt(Date.from(issuedAt));
         sessionRepository.save(session);
 
-        UserDto responseUserDto = UserEntityDtoMapper.getUserDtoFromUserEntity(user);
+        LoginResponseDto loginResponse = new LoginResponseDto(token, user.getUserId(), user.getEmail());
 
         MultiValueMapAdapter<String, String> headers = new MultiValueMapAdapter<>(new HashMap<>());
         headers.add(HttpHeaders.SET_COOKIE, "auth-token=" + token);
 
-        return new ResponseEntity<>(responseUserDto, headers, HttpStatus.OK);
+        return new ResponseEntity<>(loginResponse, headers, HttpStatus.OK);
     }
 
     public ResponseEntity<Void> logout(String token, Long userId) {

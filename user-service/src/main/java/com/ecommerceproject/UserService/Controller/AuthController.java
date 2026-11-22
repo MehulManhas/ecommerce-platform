@@ -2,6 +2,7 @@ package com.ecommerceproject.UserService.Controller;
 
 import com.ecommerceproject.UserService.Dto.LogInRequestDto;
 import com.ecommerceproject.UserService.Dto.SignUpRequestDto;
+import com.ecommerceproject.UserService.Dto.LoginResponseDto;
 import com.ecommerceproject.UserService.Dto.UserDto;
 import com.ecommerceproject.UserService.Model.Session;
 import com.ecommerceproject.UserService.Service.AuthService;
@@ -22,7 +23,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<UserDto> login(@RequestBody LogInRequestDto logInRequestDto){
+    public ResponseEntity<LoginResponseDto> login(@RequestBody LogInRequestDto logInRequestDto){
         return authService.login(logInRequestDto.getEmail(), logInRequestDto.getPassword());
     }
 
