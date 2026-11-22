@@ -70,11 +70,12 @@
 			<version>0.12.3</version>
 			<scope>runtime</scope>
 		</dependency>
-		<!-- https://mvnrepository.com/artifact/org.flywaydb/flyway-mysql -->
+		<!-- Flyway runs the db/migration scripts. This app is PostgreSQL; PostgreSQL support is
+		     built into flyway-core for Flyway 9.x, whose version is managed by the Spring Boot BOM.
+		     (Replaced flyway-mysql:10.8.1 - wrong database and an unmanaged version that could clash at startup.) -->
 		<dependency>
 			<groupId>org.flywaydb</groupId>
-			<artifactId>flyway-mysql</artifactId>
-			<version>10.8.1</version>
+			<artifactId>flyway-core</artifactId>
 		</dependency>
 		<!--
 		  Removed in Phase 2: spring-boot-starter-oauth2-authorization-server.

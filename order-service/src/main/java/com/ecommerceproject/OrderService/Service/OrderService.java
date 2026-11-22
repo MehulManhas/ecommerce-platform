@@ -54,7 +54,11 @@ public class OrderService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Unknown product: " + itemRequest.getProductId());
             }
-            int quantity = Math.max(itemRequest.getQuantity(), 1);
+            int quantity = itemRequest.getQuantity();
+            if (quantity < 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Quantity must be at least 1 for product: " + itemRequest.getProductId());
+            }
 
             OrderItem item = new OrderItem();
             item.setProductId(product.getId());
@@ -79,9 +83,13 @@ public class OrderService {
         return toResponse(saved);
     }
 
-    public OrderResponseDto getOrder(UUID id) {
+    public OrderResponseDto getOrder(UUID id, Long requesterId) {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found: " + id));
+        if (requesterId == null || !requesterId.equals(order.getUserId())) {
+            // Do not reveal another user's order (or that it exists) to a non-owner.
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found: " + id);
+        }
         return toResponse(order);
     }
 

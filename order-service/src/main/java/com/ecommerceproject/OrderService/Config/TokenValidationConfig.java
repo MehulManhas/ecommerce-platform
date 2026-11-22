@@ -24,7 +24,7 @@ public class TokenValidationConfig {
     public FilterRegistrationBean<TokenValidationFilter> tokenValidationFilterRegistration(
             TokenValidationClient tokenValidationClient) {
         FilterRegistrationBean<TokenValidationFilter> registration =
-                new FilterRegistrationBean<>(new TokenValidationFilter(tokenValidationClient));
+                new FilterRegistrationBean<>(new TokenValidationFilter(tokenValidationClient, true));
         registration.addUrlPatterns("/orders", "/orders/*");
         registration.setOrder(1);
         return registration;

@@ -1,19 +1,35 @@
 import { useEffect, useState } from 'react'
 import client from '../api/client'
-import { useAuth } from '../context/AuthContext.jsx'
 
 export default function Orders() {
-  const { auth } = useAuth()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [paying, setPaying] = useState(null)
 
-  useEffect(() => {
-    client.get('/orders', { params: { userId: auth.userId } })
+  // The backend scopes /orders to the authenticated user via the bearer token,
+  // so no userId is sent from the client.
+  function loadOrders() {
+    client.get('/orders')
       .then(({ data }) => setOrders(data))
       .catch(() => setError('Could not load orders.'))
       .finally(() => setLoading(false))
-  }, [auth.userId])
+  }
+
+  useEffect(() => { loadOrders() }, [])
+
+  function pay(order) {
+    setPaying(order.id)
+    setError('')
+    client.post('/payments', { orderId: order.id, amount: order.totalAmount })
+      .then(() => {
+        // Settlement is asynchronous (payment.completed -> order becomes PAID),
+        // so re-fetch after a short delay to show the updated status.
+        setTimeout(loadOrders, 1200)
+      })
+      .catch(() => setError('Payment failed.'))
+      .finally(() => setPaying(null))
+  }
 
   if (loading) return <p>Loading…</p>
   if (error) return <p className="error">{error}</p>
@@ -31,9 +47,14 @@ export default function Orders() {
           </div>
           <ul>
             {o.items.map((it, idx) => (
-              <li key={idx}>{it.productTitle} × {it.quantity} — ₹{it.unitPrice}</li>
+              <li key={idx}>{it.productTitle} × {it.quantity} - ₹{it.unitPrice}</li>
             ))}
           </ul>
+          {o.status === 'CREATED' && (
+            <button onClick={() => pay(o)} disabled={paying === o.id}>
+              {paying === o.id ? 'Paying…' : 'Pay now'}
+            </button>
+          )}
         </div>
       ))}
     </div>

@@ -35,6 +35,12 @@
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>
+        <!-- Shared token-validation filter/client so payment requests can be authenticated. -->
+        <dependency>
+            <groupId>com.ecommerceproject</groupId>
+            <artifactId>common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

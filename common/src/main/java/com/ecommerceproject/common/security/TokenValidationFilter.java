@@ -19,9 +19,20 @@ import java.io.IOException;
 public class TokenValidationFilter extends OncePerRequestFilter {
 
     private final TokenValidationClient tokenValidationClient;
+    private final boolean authenticateAllMethods;
 
     public TokenValidationFilter(TokenValidationClient tokenValidationClient) {
+        this(tokenValidationClient, false);
+    }
+
+    /**
+     * @param authenticateAllMethods when true, GET requests are authenticated too - used by
+     *        services such as orders where every read is per-user; when false only mutating
+     *        methods are authenticated, so public catalogue GETs pass through.
+     */
+    public TokenValidationFilter(TokenValidationClient tokenValidationClient, boolean authenticateAllMethods) {
         this.tokenValidationClient = tokenValidationClient;
+        this.authenticateAllMethods = authenticateAllMethods;
     }
 
     @Override
@@ -52,6 +63,9 @@ public class TokenValidationFilter extends OncePerRequestFilter {
     }
 
     private boolean requiresAuthentication(HttpServletRequest request) {
+        if (authenticateAllMethods) {
+            return true;
+        }
         String method = request.getMethod();
         return "POST".equalsIgnoreCase(method)
                 || "PUT".equalsIgnoreCase(method)

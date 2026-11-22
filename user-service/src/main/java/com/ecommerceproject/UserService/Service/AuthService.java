@@ -111,6 +111,10 @@ public class AuthService {
     }
 
     public UserDto signUp(String email, String password) {
+        if (userRepository.findByEmail(email).isPresent()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.CONFLICT, "An account with this email already exists");
+        }
         User user = new User();
         user.setEmail(email);
         user.setPassword(bCryptPasswordEncoder.encode(password));

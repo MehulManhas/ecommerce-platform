@@ -32,12 +32,15 @@ public class OrderController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<OrderResponseDto> getOrder(@PathVariable UUID id) {
-        return ResponseEntity.ok(orderService.getOrder(id));
+    public ResponseEntity<OrderResponseDto> getOrder(@PathVariable UUID id, HttpServletRequest httpRequest) {
+        Long userId = currentUserId(httpRequest);
+        return ResponseEntity.ok(orderService.getOrder(id, userId));
     }
 
+    // Lists only the authenticated caller's own orders; the userId comes from the verified token, not the request.
     @GetMapping
-    public ResponseEntity<List<OrderResponseDto>> getOrdersByUser(@RequestParam Long userId) {
+    public ResponseEntity<List<OrderResponseDto>> getMyOrders(HttpServletRequest httpRequest) {
+        Long userId = currentUserId(httpRequest);
         return ResponseEntity.ok(orderService.getOrdersByUser(userId));
     }
 

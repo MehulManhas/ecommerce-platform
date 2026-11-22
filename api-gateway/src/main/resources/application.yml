@@ -25,3 +25,15 @@ spring:
             - Path=/api/orders/**
           filters:
             - RewritePath=/api/(?<segment>.*), /$\{segment}
+        - id: payment-service
+          uri: ${PAYMENTSERVICE_URI:http://localhost:9095}
+          predicates:
+            - Path=/api/payments/**
+          filters:
+            - RewritePath=/api/(?<segment>.*), /$\{segment}
+        - id: inventory-service
+          uri: ${INVENTORYSERVICE_URI:http://localhost:9094}
+          predicates:
+            - Path=/api/inventory/**
+          filters:
+            - RewritePath=/api/(?<segment>.*), /$\{segment}
