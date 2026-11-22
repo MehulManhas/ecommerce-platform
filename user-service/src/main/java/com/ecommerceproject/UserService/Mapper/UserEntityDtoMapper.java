@@ -8,7 +8,7 @@ public class UserEntityDtoMapper {
     public static UserDto getUserDtoFromUserEntity(User user){
         UserDto userDto = new UserDto();
         userDto.setEmail(user.getEmail());
-        userDto.setRoles(user.getRoles());
+        userDto.setRoles(user.getRoleSet());
 
         return userDto;
     }

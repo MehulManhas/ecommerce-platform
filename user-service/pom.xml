@@ -76,13 +76,18 @@
 			<artifactId>flyway-mysql</artifactId>
 			<version>10.8.1</version>
 		</dependency>
-		<!-- https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-starter-oauth2-authorization-server -->
+		<!--
+		  Removed in Phase 2: spring-boot-starter-oauth2-authorization-server.
+		  The Security/* authorization-server classes are currently empty stubs, and the
+		  starter's auto-configuration requires a RegisteredClientRepository bean to start.
+		  Re-add this dependency when the OAuth2 authorization server is actually implemented.
+		-->
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-oauth2-authorization-server</artifactId>
-			<version>3.2.3</version>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
 		</dependency>
-
 	</dependencies>
 
 	<build>

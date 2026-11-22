@@ -12,6 +12,7 @@ import java.util.Date;
 public class Session extends BaseModel{
     private String token;
     private Date expiringAt;
+    private Date logInAt;
     @ManyToOne
     private User user;
     @Enumerated(EnumType.ORDINAL)

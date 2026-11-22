@@ -34,14 +34,14 @@ public class UserService {
 
     public UserDto setUserRoles(Long userId, List<Long> roleIds){
         Optional<User> userOptional = userRepository.findById(userId);
-        Set<Role> roles = roleRepository.findAllByUserIdIn(roleIds);
+        List<Role> roles = roleRepository.findAllByUserIdIn(roleIds);
 
         if(userOptional.isEmpty()){
             return null;
         }
 
         User user = userOptional.get();
-        user.setRoles(Set.copyOf(roles));
+        user.setRoleSet(Set.copyOf(roles));
 
         User savedUser = userRepository.save(user);
 
