@@ -12,6 +12,8 @@ import com.ecommerceproject.ProductService.Model.Product;
 import com.ecommerceproject.ProductService.Repository.CategoryRepository;
 import com.ecommerceproject.ProductService.Repository.PriceRepository;
 import com.ecommerceproject.ProductService.Repository.ProductRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -33,12 +35,14 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @Cacheable(value = "productList")
     public ProductListResponseDto getAllProducts() {
         List<Product> products = productRepository.findAll();
         return ProductMapper.productListToProductResponseDto(products);
     }
 
     @Override
+    @Cacheable(value = "products", key = "#productId")
     public ProductResponseDto getProductById(UUID productId) throws ProductNotFoundException {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductNotFoundException("Product not found with id : " + productId));
@@ -46,6 +50,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @CacheEvict(value = {"products", "productList"}, allEntries = true)
     public ProductResponseDto createProduct(ProductRequestDto newProduct) {
         if (newProduct.getTitle() == null || newProduct.getTitle().isBlank()) {
             throw new InvalidTitleException("title is invalid");
@@ -71,6 +76,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @CacheEvict(value = {"products", "productList"}, allEntries = true)
     public boolean deleteProduct(UUID productId) {
         if (!productRepository.existsById(productId)) {
             return false;
@@ -80,6 +86,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @CacheEvict(value = {"products", "productList"}, allEntries = true)
     public Product updateProduct(UUID productId, Product updatedProduct) throws ProductNotFoundException {
         Product existing = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductNotFoundException("Product not found with id : " + productId));
