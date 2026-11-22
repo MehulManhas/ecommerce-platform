@@ -2,6 +2,7 @@ package com.ecommerceproject.UserService.Service;
 
 import com.ecommerceproject.UserService.Dto.UserDto;
 import com.ecommerceproject.UserService.Exception.UserNotFoundException;
+import com.ecommerceproject.UserService.Messaging.UserEventPublisher;
 import com.ecommerceproject.UserService.Model.Session;
 import com.ecommerceproject.UserService.Model.SessionStatus;
 import com.ecommerceproject.UserService.Model.User;
@@ -40,7 +41,8 @@ class AuthServiceTest {
         userRepository = mock(UserRepository.class);
         sessionRepository = mock(SessionRepository.class);
         encoder = new BCryptPasswordEncoder();
-        authService = new AuthService(userRepository, sessionRepository, encoder, SECRET);
+        authService = new AuthService(userRepository, sessionRepository, encoder, SECRET,
+                mock(UserEventPublisher.class));
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.ecommerceproject.UserService.Mapper.UserEntityDtoMapper;
 import com.ecommerceproject.UserService.Model.Session;
 import com.ecommerceproject.UserService.Model.SessionStatus;
 import com.ecommerceproject.UserService.Model.User;
+import com.ecommerceproject.UserService.Messaging.UserEventPublisher;
 import com.ecommerceproject.UserService.Repository.SessionRepository;
 import com.ecommerceproject.UserService.Repository.UserRepository;
 import com.ecommerceproject.common.dto.ValidateTokenResponse;
@@ -37,15 +38,18 @@ public class AuthService {
     private final UserRepository userRepository;
     private final SessionRepository sessionRepository;
     private final BCryptPasswordEncoder bCryptPasswordEncoder;
+    private final UserEventPublisher userEventPublisher;
     private final SecretKey jwtKey;
 
     public AuthService(UserRepository userRepository,
                        SessionRepository sessionRepository,
                        BCryptPasswordEncoder bCryptPasswordEncoder,
-                       @Value("${jwt.secret}") String jwtSecret) {
+                       @Value("${jwt.secret}") String jwtSecret,
+                       UserEventPublisher userEventPublisher) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
         this.bCryptPasswordEncoder = bCryptPasswordEncoder;
+        this.userEventPublisher = userEventPublisher;
         // One stable signing key for the whole application lifetime (loaded from config),
         // so tokens remain verifiable across requests, restarts and instances.
         this.jwtKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
@@ -110,6 +114,9 @@ public class AuthService {
         user.setEmail(email);
         user.setPassword(bCryptPasswordEncoder.encode(password));
         User savedUser = userRepository.save(user);
+
+        userEventPublisher.publishUserSignup(savedUser.getUserId(), savedUser.getEmail());
+
         return UserDto.from(savedUser);
     }
 

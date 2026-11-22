@@ -1,0 +1,399 @@
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 113deec..83d10c4 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -31,6 +31,27 @@ services:
+       timeout: 5s
+       retries: 5
+ 
++  # Single-node Kafka (KRaft mode, no ZooKeeper). advertised listener is localhost
++  # because the services currently run on the host; Phase 6 adjusts this when the
++  # services move into containers.
++  kafka:
++    image: apache/kafka:3.7.0
++    container_name: ecommerce-kafka
++    ports:
++      - "9092:9092"
++    environment:
++      KAFKA_NODE_ID: 1
++      KAFKA_PROCESS_ROLES: broker,controller
++      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
++      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
++      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
++      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
++      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
++      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
++      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
++      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
++      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
++
+ volumes:
+   pgdata:
+ 
+diff --git a/order-service/pom.xml b/order-service/pom.xml
+index c3d62aa..b9939b7 100644
+--- a/order-service/pom.xml
++++ b/order-service/pom.xml
+@@ -44,6 +44,10 @@
+             <artifactId>spring-boot-starter-test</artifactId>
+             <scope>test</scope>
+         </dependency>
++        <dependency>
++            <groupId>org.springframework.kafka</groupId>
++            <artifactId>spring-kafka</artifactId>
++        </dependency>
+     </dependencies>
+ 
+     <build>
+diff --git a/order-service/src/main/java/com/ecommerceproject/OrderService/Event/OrderPlacedEvent.java b/order-service/src/main/java/com/ecommerceproject/OrderService/Event/OrderPlacedEvent.java
+new file mode 100644
+index 0000000..709c1fc
+--- /dev/null
++++ b/order-service/src/main/java/com/ecommerceproject/OrderService/Event/OrderPlacedEvent.java
+@@ -0,0 +1,46 @@
++package com.ecommerceproject.OrderService.Event;
++
++import java.util.UUID;
++
++/**
++ * Payload published to the "order.placed" topic. Plain POJO with getters so it
++ * serialises cleanly to JSON.
++ */
++public class OrderPlacedEvent {
++    private UUID orderId;
++    private Long userId;
++    private double totalAmount;
++    private int itemCount;
++    private long timestamp;
++
++    public OrderPlacedEvent() {
++    }
++
++    public OrderPlacedEvent(UUID orderId, Long userId, double totalAmount, int itemCount, long timestamp) {
++        this.orderId = orderId;
++        this.userId = userId;
++        this.totalAmount = totalAmount;
++        this.itemCount = itemCount;
++        this.timestamp = timestamp;
++    }
++
++    public UUID getOrderId() {
++        return orderId;
++    }
++
++    public Long getUserId() {
++        return userId;
++    }
++
++    public double getTotalAmount() {
++        return totalAmount;
++    }
++
++    public int getItemCount() {
++        return itemCount;
++    }
++
++    public long getTimestamp() {
++        return timestamp;
++    }
++}
+diff --git a/order-service/src/main/java/com/ecommerceproject/OrderService/Messaging/OrderEventPublisher.java b/order-service/src/main/java/com/ecommerceproject/OrderService/Messaging/OrderEventPublisher.java
+new file mode 100644
+index 0000000..32cfc1a
+--- /dev/null
++++ b/order-service/src/main/java/com/ecommerceproject/OrderService/Messaging/OrderEventPublisher.java
+@@ -0,0 +1,37 @@
++package com.ecommerceproject.OrderService.Messaging;
++
++import com.ecommerceproject.OrderService.Event.OrderPlacedEvent;
++import com.fasterxml.jackson.databind.ObjectMapper;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.kafka.core.KafkaTemplate;
++import org.springframework.stereotype.Component;
++
++/**
++ * Publishes order lifecycle events to Kafka. Publishing never breaks the order
++ * flow: a broker that is down is logged and swallowed.
++ */
++@Component
++public class OrderEventPublisher {
++
++    private static final Logger log = LoggerFactory.getLogger(OrderEventPublisher.class);
++    public static final String ORDER_PLACED_TOPIC = "order.placed";
++
++    private final KafkaTemplate<String, String> kafkaTemplate;
++    private final ObjectMapper objectMapper;
++
++    public OrderEventPublisher(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
++        this.kafkaTemplate = kafkaTemplate;
++        this.objectMapper = objectMapper;
++    }
++
++    public void publishOrderPlaced(OrderPlacedEvent event) {
++        try {
++            String payload = objectMapper.writeValueAsString(event);
++            kafkaTemplate.send(ORDER_PLACED_TOPIC, String.valueOf(event.getOrderId()), payload);
++            log.info("Published {} event for order {}", ORDER_PLACED_TOPIC, event.getOrderId());
++        } catch (Exception ex) {
++            log.warn("Failed to publish {} event: {}", ORDER_PLACED_TOPIC, ex.getMessage());
++        }
++    }
++}
+diff --git a/order-service/src/main/java/com/ecommerceproject/OrderService/Service/OrderService.java b/order-service/src/main/java/com/ecommerceproject/OrderService/Service/OrderService.java
+index 5fd41ea..3f3358f 100644
+--- a/order-service/src/main/java/com/ecommerceproject/OrderService/Service/OrderService.java
++++ b/order-service/src/main/java/com/ecommerceproject/OrderService/Service/OrderService.java
+@@ -2,6 +2,8 @@ package com.ecommerceproject.OrderService.Service;
+ 
+ import com.ecommerceproject.OrderService.Client.ProductClient;
+ import com.ecommerceproject.OrderService.Dto.CreateOrderRequestDto;
++import com.ecommerceproject.OrderService.Event.OrderPlacedEvent;
++import com.ecommerceproject.OrderService.Messaging.OrderEventPublisher;
+ import com.ecommerceproject.OrderService.Dto.OrderItemRequestDto;
+ import com.ecommerceproject.OrderService.Dto.OrderItemResponseDto;
+ import com.ecommerceproject.OrderService.Dto.OrderResponseDto;
+@@ -24,10 +26,14 @@ public class OrderService {
+ 
+     private final OrderRepository orderRepository;
+     private final ProductClient productClient;
++    private final OrderEventPublisher orderEventPublisher;
+ 
+-    public OrderService(OrderRepository orderRepository, ProductClient productClient) {
++    public OrderService(OrderRepository orderRepository,
++                        ProductClient productClient,
++                        OrderEventPublisher orderEventPublisher) {
+         this.orderRepository = orderRepository;
+         this.productClient = productClient;
++        this.orderEventPublisher = orderEventPublisher;
+     }
+ 
+     @Transactional
+@@ -62,6 +68,14 @@ public class OrderService {
+         order.setTotalAmount(total);
+ 
+         Order saved = orderRepository.save(order);
++
++        orderEventPublisher.publishOrderPlaced(new OrderPlacedEvent(
++                saved.getId(),
++                saved.getUserId(),
++                saved.getTotalAmount(),
++                saved.getItems().size(),
++                System.currentTimeMillis()));
++
+         return toResponse(saved);
+     }
+ 
+diff --git a/order-service/src/main/resources/application.properties b/order-service/src/main/resources/application.properties
+index 36225ce..cd30090 100644
+--- a/order-service/src/main/resources/application.properties
++++ b/order-service/src/main/resources/application.properties
+@@ -11,3 +11,8 @@ spring.datasource.password=password
+ #Inter-service URLs
+ userservice.base-url=http://localhost:8081
+ productservice.base-url=http://localhost:9090
++
++#Kafka (producer of order.placed)
++spring.kafka.bootstrap-servers=localhost:9092
++spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
++spring.kafka.producer.value-serializer=org.apache.kafka.common.serialization.StringSerializer
+diff --git a/product-service/pom.xml b/product-service/pom.xml
+index fb4f2db..321604c 100644
+--- a/product-service/pom.xml
++++ b/product-service/pom.xml
+@@ -54,6 +54,10 @@
+ 			<groupId>org.springframework.boot</groupId>
+ 			<artifactId>spring-boot-starter-cache</artifactId>
+ 		</dependency>
++		<dependency>
++			<groupId>org.springframework.kafka</groupId>
++			<artifactId>spring-kafka</artifactId>
++		</dependency>
+ 	</dependencies>
+ 
+ 
+diff --git a/product-service/src/main/java/com/ecommerceproject/ProductService/Messaging/OrderEventListener.java b/product-service/src/main/java/com/ecommerceproject/ProductService/Messaging/OrderEventListener.java
+new file mode 100644
+index 0000000..229347c
+--- /dev/null
++++ b/product-service/src/main/java/com/ecommerceproject/ProductService/Messaging/OrderEventListener.java
+@@ -0,0 +1,22 @@
++package com.ecommerceproject.ProductService.Messaging;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.kafka.annotation.KafkaListener;
++import org.springframework.stereotype.Component;
++
++/**
++ * Consumes order.placed events. For now it just logs them; a real implementation
++ * might decrement stock or update product metrics. Demonstrates the asynchronous,
++ * event-driven link between the Order Service and the Product Service.
++ */
++@Component
++public class OrderEventListener {
++
++    private static final Logger log = LoggerFactory.getLogger(OrderEventListener.class);
++
++    @KafkaListener(topics = "order.placed", groupId = "product-service")
++    public void onOrderPlaced(String message) {
++        log.info("[product-service] received order.placed event: {}", message);
++    }
++}
+diff --git a/product-service/src/main/resources/application.properties b/product-service/src/main/resources/application.properties
+index 70a681a..132f8f3 100644
+--- a/product-service/src/main/resources/application.properties
++++ b/product-service/src/main/resources/application.properties
+@@ -21,3 +21,10 @@ spring.data.redis.host=localhost
+ spring.data.redis.port=6379
+ spring.cache.type=redis
+ spring.cache.redis.time-to-live=60000
++
++#Kafka (consumer of order.placed)
++spring.kafka.bootstrap-servers=localhost:9092
++spring.kafka.consumer.group-id=product-service
++spring.kafka.consumer.auto-offset-reset=earliest
++spring.kafka.consumer.key-deserializer=org.apache.kafka.common.serialization.StringDeserializer
++spring.kafka.consumer.value-deserializer=org.apache.kafka.common.serialization.StringDeserializer
+diff --git a/user-service/pom.xml b/user-service/pom.xml
+index 552d00b..564fbd0 100644
+--- a/user-service/pom.xml
++++ b/user-service/pom.xml
+@@ -93,6 +93,10 @@
+ 			<artifactId>common</artifactId>
+ 			<version>0.0.1-SNAPSHOT</version>
+ 		</dependency>
++		<dependency>
++			<groupId>org.springframework.kafka</groupId>
++			<artifactId>spring-kafka</artifactId>
++		</dependency>
+ 	</dependencies>
+ 
+ 	<build>
+diff --git a/user-service/src/main/java/com/ecommerceproject/UserService/Messaging/UserEventPublisher.java b/user-service/src/main/java/com/ecommerceproject/UserService/Messaging/UserEventPublisher.java
+new file mode 100644
+index 0000000..5091975
+--- /dev/null
++++ b/user-service/src/main/java/com/ecommerceproject/UserService/Messaging/UserEventPublisher.java
+@@ -0,0 +1,44 @@
++package com.ecommerceproject.UserService.Messaging;
++
++import com.fasterxml.jackson.databind.ObjectMapper;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++import org.springframework.kafka.core.KafkaTemplate;
++import org.springframework.stereotype.Component;
++
++import java.util.HashMap;
++import java.util.Map;
++
++/**
++ * Publishes user lifecycle events to Kafka. Publishing never breaks signup:
++ * a broker that is down is logged and swallowed.
++ */
++@Component
++public class UserEventPublisher {
++
++    private static final Logger log = LoggerFactory.getLogger(UserEventPublisher.class);
++    public static final String USER_SIGNUP_TOPIC = "user.signup";
++
++    private final KafkaTemplate<String, String> kafkaTemplate;
++    private final ObjectMapper objectMapper;
++
++    public UserEventPublisher(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
++        this.kafkaTemplate = kafkaTemplate;
++        this.objectMapper = objectMapper;
++    }
++
++    public void publishUserSignup(Long userId, String email) {
++        try {
++            Map<String, Object> event = new HashMap<>();
++            event.put("userId", userId);
++            event.put("email", email);
++            event.put("timestamp", System.currentTimeMillis());
++
++            String payload = objectMapper.writeValueAsString(event);
++            kafkaTemplate.send(USER_SIGNUP_TOPIC, String.valueOf(userId), payload);
++            log.info("Published {} event for user {}", USER_SIGNUP_TOPIC, userId);
++        } catch (Exception ex) {
++            log.warn("Failed to publish {} event: {}", USER_SIGNUP_TOPIC, ex.getMessage());
++        }
++    }
++}
+diff --git a/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java b/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java
+index 7c71145..3a5d960 100644
+--- a/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java
++++ b/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java
+@@ -8,6 +8,7 @@ import com.ecommerceproject.UserService.Mapper.UserEntityDtoMapper;
+ import com.ecommerceproject.UserService.Model.Session;
+ import com.ecommerceproject.UserService.Model.SessionStatus;
+ import com.ecommerceproject.UserService.Model.User;
++import com.ecommerceproject.UserService.Messaging.UserEventPublisher;
+ import com.ecommerceproject.UserService.Repository.SessionRepository;
+ import com.ecommerceproject.UserService.Repository.UserRepository;
+ import com.ecommerceproject.common.dto.ValidateTokenResponse;
+@@ -37,15 +38,18 @@ public class AuthService {
+     private final UserRepository userRepository;
+     private final SessionRepository sessionRepository;
+     private final BCryptPasswordEncoder bCryptPasswordEncoder;
++    private final UserEventPublisher userEventPublisher;
+     private final SecretKey jwtKey;
+ 
+     public AuthService(UserRepository userRepository,
+                        SessionRepository sessionRepository,
+                        BCryptPasswordEncoder bCryptPasswordEncoder,
+-                       @Value("${jwt.secret}") String jwtSecret) {
++                       @Value("${jwt.secret}") String jwtSecret,
++                       UserEventPublisher userEventPublisher) {
+         this.userRepository = userRepository;
+         this.sessionRepository = sessionRepository;
+         this.bCryptPasswordEncoder = bCryptPasswordEncoder;
++        this.userEventPublisher = userEventPublisher;
+         // One stable signing key for the whole application lifetime (loaded from config),
+         // so tokens remain verifiable across requests, restarts and instances.
+         this.jwtKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+@@ -110,6 +114,9 @@ public class AuthService {
+         user.setEmail(email);
+         user.setPassword(bCryptPasswordEncoder.encode(password));
+         User savedUser = userRepository.save(user);
++
++        userEventPublisher.publishUserSignup(savedUser.getUserId(), savedUser.getEmail());
++
+         return UserDto.from(savedUser);
+     }
+ 
+diff --git a/user-service/src/main/resources/application.properties b/user-service/src/main/resources/application.properties
+index f583d10..4fd882e 100644
+--- a/user-service/src/main/resources/application.properties
++++ b/user-service/src/main/resources/application.properties
+@@ -10,3 +10,8 @@ spring.datasource.username=postgres
+ spring.datasource.password=password
+ #JWT properties (Base64-encoded signing secret; override via env var in real deployments)
+ jwt.secret=${JWT_SECRET:isk7Bx5VWrClcAuui12GBJ3GEM17F/awnPWHLhYC7uNvjH44ZKl7hldApRWRzTxn}
++
++#Kafka (producer of user.signup)
++spring.kafka.bootstrap-servers=localhost:9092
++spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
++spring.kafka.producer.value-serializer=org.apache.kafka.common.serialization.StringSerializer
+diff --git a/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java b/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java
+index bffa5b5..d5b79ff 100644
+--- a/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java
++++ b/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java
+@@ -2,6 +2,7 @@ package com.ecommerceproject.UserService.Service;
+ 
+ import com.ecommerceproject.UserService.Dto.UserDto;
+ import com.ecommerceproject.UserService.Exception.UserNotFoundException;
++import com.ecommerceproject.UserService.Messaging.UserEventPublisher;
+ import com.ecommerceproject.UserService.Model.Session;
+ import com.ecommerceproject.UserService.Model.SessionStatus;
+ import com.ecommerceproject.UserService.Model.User;
+@@ -40,7 +41,8 @@ class AuthServiceTest {
+         userRepository = mock(UserRepository.class);
+         sessionRepository = mock(SessionRepository.class);
+         encoder = new BCryptPasswordEncoder();
+-        authService = new AuthService(userRepository, sessionRepository, encoder, SECRET);
++        authService = new AuthService(userRepository, sessionRepository, encoder, SECRET,
++                mock(UserEventPublisher.class));
+     }
+ 
+     @Test

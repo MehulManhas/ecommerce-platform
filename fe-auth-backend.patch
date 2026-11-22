@@ -1,0 +1,108 @@
+diff --git a/user-service/src/main/java/com/ecommerceproject/UserService/Controller/AuthController.java b/user-service/src/main/java/com/ecommerceproject/UserService/Controller/AuthController.java
+index 23970f2..fdee66b 100644
+--- a/user-service/src/main/java/com/ecommerceproject/UserService/Controller/AuthController.java
++++ b/user-service/src/main/java/com/ecommerceproject/UserService/Controller/AuthController.java
+@@ -2,6 +2,7 @@ package com.ecommerceproject.UserService.Controller;
+ 
+ import com.ecommerceproject.UserService.Dto.LogInRequestDto;
+ import com.ecommerceproject.UserService.Dto.SignUpRequestDto;
++import com.ecommerceproject.UserService.Dto.LoginResponseDto;
+ import com.ecommerceproject.UserService.Dto.UserDto;
+ import com.ecommerceproject.UserService.Model.Session;
+ import com.ecommerceproject.UserService.Service.AuthService;
+@@ -22,7 +23,7 @@ public class AuthController {
+     }
+ 
+     @PostMapping("/login")
+-    public ResponseEntity<UserDto> login(@RequestBody LogInRequestDto logInRequestDto){
++    public ResponseEntity<LoginResponseDto> login(@RequestBody LogInRequestDto logInRequestDto){
+         return authService.login(logInRequestDto.getEmail(), logInRequestDto.getPassword());
+     }
+ 
+diff --git a/user-service/src/main/java/com/ecommerceproject/UserService/Dto/LoginResponseDto.java b/user-service/src/main/java/com/ecommerceproject/UserService/Dto/LoginResponseDto.java
+new file mode 100644
+index 0000000..97812c2
+--- /dev/null
++++ b/user-service/src/main/java/com/ecommerceproject/UserService/Dto/LoginResponseDto.java
+@@ -0,0 +1,25 @@
++package com.ecommerceproject.UserService.Dto;
++
++import lombok.Getter;
++import lombok.Setter;
++
++/**
++ * Returned by /auth/login. The token is in the body (not only a cookie) so a
++ * browser SPA can store it and send it as an Authorization: Bearer header.
++ */
++@Getter
++@Setter
++public class LoginResponseDto {
++    private String token;
++    private Long userId;
++    private String email;
++
++    public LoginResponseDto() {
++    }
++
++    public LoginResponseDto(String token, Long userId, String email) {
++        this.token = token;
++        this.userId = userId;
++        this.email = email;
++    }
++}
+diff --git a/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java b/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java
+index 3a5d960..fdc70f8 100644
+--- a/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java
++++ b/user-service/src/main/java/com/ecommerceproject/UserService/Service/AuthService.java
+@@ -1,5 +1,6 @@
+ package com.ecommerceproject.UserService.Service;
+ 
++import com.ecommerceproject.UserService.Dto.LoginResponseDto;
+ import com.ecommerceproject.UserService.Dto.UserDto;
+ import com.ecommerceproject.UserService.Exception.InvalidCredentialException;
+ import com.ecommerceproject.UserService.Exception.InvalidSessionLogoutException;
+@@ -55,7 +56,7 @@ public class AuthService {
+         this.jwtKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+     }
+ 
+-    public ResponseEntity<UserDto> login(String email, String password) {
++    public ResponseEntity<LoginResponseDto> login(String email, String password) {
+         User user = userRepository.findByEmail(email)
+                 .orElseThrow(() -> new UserNotFoundException("User not found in the database"));
+ 
+@@ -87,12 +88,12 @@ public class AuthService {
+         session.setLogInAt(Date.from(issuedAt));
+         sessionRepository.save(session);
+ 
+-        UserDto responseUserDto = UserEntityDtoMapper.getUserDtoFromUserEntity(user);
++        LoginResponseDto loginResponse = new LoginResponseDto(token, user.getUserId(), user.getEmail());
+ 
+         MultiValueMapAdapter<String, String> headers = new MultiValueMapAdapter<>(new HashMap<>());
+         headers.add(HttpHeaders.SET_COOKIE, "auth-token=" + token);
+ 
+-        return new ResponseEntity<>(responseUserDto, headers, HttpStatus.OK);
++        return new ResponseEntity<>(loginResponse, headers, HttpStatus.OK);
+     }
+ 
+     public ResponseEntity<Void> logout(String token, Long userId) {
+diff --git a/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java b/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java
+index d5b79ff..1fa73df 100644
+--- a/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java
++++ b/user-service/src/test/java/com/ecommerceproject/UserService/Service/AuthServiceTest.java
+@@ -1,6 +1,6 @@
+ package com.ecommerceproject.UserService.Service;
+ 
+-import com.ecommerceproject.UserService.Dto.UserDto;
++import com.ecommerceproject.UserService.Dto.LoginResponseDto;
+ import com.ecommerceproject.UserService.Exception.UserNotFoundException;
+ import com.ecommerceproject.UserService.Messaging.UserEventPublisher;
+ import com.ecommerceproject.UserService.Model.Session;
+@@ -53,7 +53,7 @@ class AuthServiceTest {
+         user.setPassword(encoder.encode("pass"));
+         when(userRepository.findByEmail("a@b.com")).thenReturn(Optional.of(user));
+ 
+-        ResponseEntity<UserDto> response = authService.login("a@b.com", "pass");
++        ResponseEntity<LoginResponseDto> response = authService.login("a@b.com", "pass");
+         assertEquals(HttpStatus.OK, response.getStatusCode());
+ 
+         ArgumentCaptor<Session> captor = ArgumentCaptor.forClass(Session.class);
