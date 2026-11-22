@@ -2,7 +2,7 @@
 
 A backend-focused, event-driven **e-commerce platform** built as a Spring Boot **Maven multi-module monorepo**. It demonstrates the core patterns of a modern microservices system: an API gateway, JWT-based authentication, service-to-service calls, Redis caching, asynchronous messaging over Apache Kafka, containerised deployment, and a React storefront.
 
-> Built as the applied project for the Scaler Neovarsity — Woolf **M.Sc. Computer Science (Backend Specialization)**.
+> Built as the applied project for the Scaler Neovarsity - Woolf **M.Sc. Computer Science (Backend Specialization)**.
 
 ---
 
@@ -30,7 +30,7 @@ A backend-focused, event-driven **e-commerce platform** built as a Spring Boot *
 
 ## Overview
 
-The platform decomposes a monolithic storefront into **seven independently deployable services** coordinated by an API gateway. Clients never talk to a service directly for the core flows — they go through the gateway, which handles routing and path rewriting. Services communicate **synchronously** over REST for request/response needs (e.g. price lookups, token validation) and **asynchronously** over Kafka for side effects (notifications, stock updates, payment settlement), keeping the services loosely coupled.
+The platform decomposes a monolithic storefront into **seven independently deployable services** coordinated by an API gateway. Clients never talk to a service directly for the core flows - they go through the gateway, which handles routing and path rewriting. Services communicate **synchronously** over REST for request/response needs (e.g. price lookups, token validation) and **asynchronously** over Kafka for side effects (notifications, stock updates, payment settlement), keeping the services loosely coupled.
 
 Key capabilities:
 
@@ -74,7 +74,7 @@ Key capabilities:
               Payment :9095  ──(POST /payments, direct)──▶ publishes payment.completed
 ```
 
-All services share a **PostgreSQL** instance (one logical schema per service — database-per-service in production).
+All services share a **PostgreSQL** instance (one logical schema per service - database-per-service in production).
 
 ## Services
 
@@ -87,7 +87,7 @@ All services share a **PostgreSQL** instance (one logical schema per service —
 | **payment-service** | 9095 | Mock payment settlement; emits `payment.completed` | JPA, Kafka producer |
 | **inventory-service** | 9094 | Stock levels per product; reacts to orders | JPA, Kafka consumer |
 | **notification-service** | 9093 | Logs notifications for signups and orders | Kafka consumer |
-| **common** | — | Shared token-validation client & filter (library module) | plain Java + spring-web |
+| **common** | - | Shared token-validation client & filter (library module) | plain Java + spring-web |
 
 ## Technology Stack
 
@@ -133,7 +133,7 @@ ecommerce-platform/
 
 ## Prerequisites
 
-- **JDK 17+** (JDK 21 recommended — see note under Build)
+- **JDK 17+** (JDK 21 recommended - see note under Build)
 - **Maven 3.9+** (or use the bundled toolchain)
 - **Docker** & **Docker Compose** (for Postgres, Redis, Kafka)
 - **Node.js 18+** (only to run the frontend)
@@ -157,7 +157,7 @@ This compiles and packages all eight modules. No running infrastructure is requi
 
 ## Run Locally
 
-### Option A — Docker Compose (recommended)
+### Option A - Docker Compose (recommended)
 
 Brings up Postgres, Redis, Kafka and the core service containers:
 
@@ -165,7 +165,7 @@ Brings up Postgres, Redis, Kafka and the core service containers:
 docker compose up --build
 ```
 
-### Option B — Infrastructure in Docker, services from your IDE
+### Option B - Infrastructure in Docker, services from your IDE
 
 ```bash
 docker compose up postgres redis kafka
@@ -192,37 +192,36 @@ Gateway routes are parameterised with environment variables (e.g. `USERSERVICE_U
 
 All client traffic goes through the gateway at `http://localhost:8080` using the `/api` prefix (the gateway strips `/api` before forwarding).
 
-### User Service — `/api/auth`, `/api/users`, `/api/roles`
+### User Service - `/api/auth`, `/api/users`, `/api/roles`
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/users/signup` | Register a new user |
+| POST | `/api/auth/signup` | Register a new user |
 | POST | `/api/auth/login` | Authenticate; returns a JWT (body + cookie) |
 | GET | `/api/auth/validate` | Validate a bearer token (used by services) |
-| GET | `/api/auth/session` | Current session details |
+| GET | `/api/auth/sessions` | List sessions |
 | POST | `/api/users/{id}/roles` | Assign a role to a user |
 
-### Product Service — `/api/products`
+### Product Service - `/api/products`
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/products` | List products (cached) |
 | GET | `/api/products/{id}` | Get a product by UUID (cached) |
 | GET | `/api/products/title/{title}` | Find by title |
 | POST | `/api/products` | Create a product |
-| PUT | `/api/products/{id}` | Update a product |
 | DELETE | `/api/products/{id}` | Delete a product |
 
-### Order Service — `/api/orders`
+### Order Service - `/api/orders`
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/orders` | Place an order (validates items, resolves prices, emits `order.placed`) |
 | GET | `/api/orders` | List the authenticated user's orders |
 
-### Payment Service — `/payments` (called directly on `:9095`)
+### Payment Service - `/payments` (called directly on `:9095`)
 | Method | Path | Description |
 |---|---|---|
 | POST | `/payments` | Settle a payment for an order; emits `payment.completed` |
 
-### Inventory Service — `/inventory` (called directly on `:9094`)
+### Inventory Service - `/inventory` (called directly on `:9094`)
 | Method | Path | Description |
 |---|---|---|
 | GET | `/inventory/{productId}` | Current stock level |
@@ -230,7 +229,7 @@ All client traffic goes through the gateway at `http://localhost:8080` using the
 
 ## Authentication Flow
 
-1. The client calls `POST /api/users/signup`, then `POST /api/auth/login`.
+1. The client calls `POST /api/auth/signup`, then `POST /api/auth/login`.
 2. The User Service verifies credentials and issues a **stateless JWT** (HMAC-signed, with a stable key from configuration), returned both in the response body and as a cookie.
 3. For protected calls, the client sends `Authorization: Bearer <token>`.
 4. Downstream services validate the token via the shared **`common`** module (`TokenValidationFilter` → `TokenValidationClient` → User Service `/auth/validate`) and populate an auth context with the caller's user id.
@@ -265,7 +264,7 @@ The Vite dev server proxies `/api` to the gateway at `http://localhost:8080` (av
 
 ## Deployment (AWS)
 
-The target topology (see `docs/`) places the services behind an **Application Load Balancer** in a VPC: the app tier (gateway + services) runs in private subnets on EC2/ECS Auto Scaling groups, with managed data services — **Amazon RDS (PostgreSQL, Multi-AZ)**, **Amazon ElastiCache (Redis)**, and **Amazon MSK (Kafka)** — in isolated data subnets. Security groups restrict traffic to the minimum required between tiers.
+The target topology (see `docs/`) places the services behind an **Application Load Balancer** in a VPC: the app tier (gateway + services) runs in private subnets on EC2/ECS Auto Scaling groups, with managed data services - **Amazon RDS (PostgreSQL, Multi-AZ)**, **Amazon ElastiCache (Redis)**, and **Amazon MSK (Kafka)** - in isolated data subnets. Security groups restrict traffic to the minimum required between tiers.
 
 ## Project Report
 
@@ -273,4 +272,4 @@ A detailed applied-project report (architecture, class diagrams, database schema
 
 ---
 
-*Author: Mehul Manhas · Scaler Neovarsity — Woolf, M.Sc. Computer Science (Backend Specialization).*
+*Author: Mehul Manhas · Scaler Neovarsity - Woolf, M.Sc. Computer Science (Backend Specialization).*
