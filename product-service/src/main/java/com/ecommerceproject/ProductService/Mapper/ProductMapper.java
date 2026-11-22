@@ -33,15 +33,7 @@ public class ProductMapper {
         ProductListResponseDto productListResponseDto = new ProductListResponseDto();
 
         for(Product p : productList){
-            ProductResponseDto productResponseDto = new ProductResponseDto();
-            productResponseDto.setPrice(p.getPrice().getAmount());
-            productResponseDto.setId(p.getId());
-            productResponseDto.setTitle(p.getTitle());
-            productResponseDto.setDescription(p.getDescription());
-            productResponseDto.setImage(p.getImage());
-            productResponseDto.setCategory(p.getCategory().getCategoryName());
-
-            productListResponseDto.getProductList().add(productResponseDto);
+            productListResponseDto.getProductList().add(productToProductResponseDto(p));
         }
 
         return productListResponseDto;
@@ -49,12 +41,16 @@ public class ProductMapper {
 
     public static ProductResponseDto productToProductResponseDto(Product product){
         ProductResponseDto productResponseDto = new ProductResponseDto();
-        productResponseDto.setPrice(product.getPrice().getAmount());
+        if (product.getPrice() != null) {
+            productResponseDto.setPrice(product.getPrice().getAmount());
+        }
         productResponseDto.setId(product.getId());
         productResponseDto.setTitle(product.getTitle());
         productResponseDto.setDescription(product.getDescription());
         productResponseDto.setImage(product.getImage());
-        productResponseDto.setCategory(product.getCategory().getCategoryName());
+        if (product.getCategory() != null) {
+            productResponseDto.setCategory(product.getCategory().getCategoryName());
+        }
 
         return productResponseDto;
     }

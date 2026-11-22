@@ -10,9 +10,13 @@ import com.ecommerceproject.UserService.Model.SessionStatus;
 import com.ecommerceproject.UserService.Model.User;
 import com.ecommerceproject.UserService.Repository.SessionRepository;
 import com.ecommerceproject.UserService.Repository.UserRepository;
-import io.jsonwebtoken.Jwt;
+import com.ecommerceproject.common.dto.ValidateTokenResponse;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.MacAlgorithm;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,72 +25,76 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.MultiValueMapAdapter;
 
 import javax.crypto.SecretKey;
-import java.time.LocalDate;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
-
 
 @Service
 public class AuthService {
 
-    private UserRepository userRepository;
-    private SessionRepository sessionRepository;
-    private BCryptPasswordEncoder bCryptPasswordEncoder;
+    private static final long SESSION_VALIDITY_DAYS = 3;
 
-    public AuthService(UserRepository userRepository, SessionRepository sessionRepository, BCryptPasswordEncoder bCryptPasswordEncoder) {
+    private final UserRepository userRepository;
+    private final SessionRepository sessionRepository;
+    private final BCryptPasswordEncoder bCryptPasswordEncoder;
+    private final SecretKey jwtKey;
+
+    public AuthService(UserRepository userRepository,
+                       SessionRepository sessionRepository,
+                       BCryptPasswordEncoder bCryptPasswordEncoder,
+                       @Value("${jwt.secret}") String jwtSecret) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
         this.bCryptPasswordEncoder = bCryptPasswordEncoder;
+        // One stable signing key for the whole application lifetime (loaded from config),
+        // so tokens remain verifiable across requests, restarts and instances.
+        this.jwtKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
     }
 
-    public ResponseEntity<UserDto> login(String email, String password){
-        Optional<User> userOptional = userRepository.findByEmail(email);
+    public ResponseEntity<UserDto> login(String email, String password) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("User not found in the database"));
 
-        if(userOptional.isEmpty()){
-            throw new UserNotFoundException("User not found in the database");
-        }
-
-        User user = userOptional.get();
-
-        if(!bCryptPasswordEncoder.matches(password, user.getPassword())){
+        if (!bCryptPasswordEncoder.matches(password, user.getPassword())) {
             throw new InvalidCredentialException("password is incorrect for the given id");
         }
 
-        //String token = RandomStringUtils.randomAlphanumeric(30);
+        Instant issuedAt = Instant.now();
+        Instant expiresAt = issuedAt.plus(SESSION_VALIDITY_DAYS, ChronoUnit.DAYS);
 
-        MacAlgorithm macAlgorithm = Jwts.SIG.HS256;
-        SecretKey key = macAlgorithm.key().build();
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("email", user.getEmail());
+        claims.put("roles", user.getRoleSet().stream().map(role -> role.getRoleName()).toList());
 
-        Map<String, Object> jsonForJwt = new HashMap<>();
-        jsonForJwt.put("email", user.getEmail());
-        jsonForJwt.put("roles", user.getRoles());
-        jsonForJwt.put("createdAt", new Date(LocalDate.now().toEpochDay()));
-        jsonForJwt.put("expiringAt", new Date(LocalDate.now().plusDays(3).toEpochDay()));
-
-        String token = Jwts.builder().claims(jsonForJwt).signWith(key, macAlgorithm).compact();
+        String token = Jwts.builder()
+                .claims(claims)
+                .subject(String.valueOf(user.getUserId()))
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(expiresAt))
+                .signWith(jwtKey)
+                .compact();
 
         Session session = new Session();
         session.setToken(token);
         session.setSessionStatus(SessionStatus.ACTIVE);
         session.setUser(user);
         session.setUserId(user.getUserId());
-        session.setExpiringAt(new Date());
-        session.setLogInAt(new Date());
-
+        session.setExpiringAt(Date.from(expiresAt));
+        session.setLogInAt(Date.from(issuedAt));
         sessionRepository.save(session);
 
         UserDto responseUserDto = UserEntityDtoMapper.getUserDtoFromUserEntity(user);
 
         MultiValueMapAdapter<String, String> headers = new MultiValueMapAdapter<>(new HashMap<>());
-
-        headers.add(HttpHeaders.SET_COOKIE,token);
+        headers.add(HttpHeaders.SET_COOKIE, "auth-token=" + token);
 
         return new ResponseEntity<>(responseUserDto, headers, HttpStatus.OK);
     }
 
-    public ResponseEntity<Void> logout(String token, Long userId){
+    public ResponseEntity<Void> logout(String token, Long userId) {
         Optional<Session> sessionOptional = sessionRepository.findByTokenAndUserId(token, userId);
 
-        if(sessionOptional.isEmpty()){
+        if (sessionOptional.isEmpty()) {
             throw new InvalidSessionLogoutException("Session you're trying to log out doesn't exist");
         }
 
@@ -97,7 +105,7 @@ public class AuthService {
         return new ResponseEntity<>(HttpStatus.OK);
     }
 
-    public UserDto signUp(String email, String password){
+    public UserDto signUp(String email, String password) {
         User user = new User();
         user.setEmail(email);
         user.setPassword(bCryptPasswordEncoder.encode(password));
@@ -105,24 +113,65 @@ public class AuthService {
         return UserDto.from(savedUser);
     }
 
-    public SessionStatus validate(Long userId, String token){
+    public SessionStatus validate(Long userId, String token) {
         Optional<Session> sessionOptional = sessionRepository.findByTokenAndUserId(token, userId);
 
-        if(sessionOptional.isEmpty() || sessionOptional.get().getSessionStatus().equals(SessionStatus.ENDED)){
+        if (sessionOptional.isEmpty() || sessionOptional.get().getSessionStatus().equals(SessionStatus.ENDED)) {
             throw new UserNotFoundException("Invalid token for the given user id");
         }
 
-
-        Jwt parsed = Jwts.parser().build().parse(token);
+        try {
+            // Verifies the signature with the stable key and enforces the expiration claim.
+            Jwts.parser()
+                    .verifyWith(jwtKey)
+                    .build()
+                    .parseSignedClaims(token);
+        } catch (JwtException ex) {
+            throw new InvalidCredentialException("Token signature/expiry validation failed");
+        }
 
         return SessionStatus.ACTIVE;
     }
 
-    //Below methods are used just for testing purpose not to be deployed
+    /**
+     * Resolves and verifies a bearer token for cross-service calls. The caller's
+     * id is taken from the verified JWT subject (set at login), so the consumer
+     * only needs to forward the token. Returns valid=false on any failure.
+     */
+    public ValidateTokenResponse validateToken(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(jwtKey)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
 
-    public List<Session> getAllSessions(){
-        List<Session> sessionList = sessionRepository.findAll();
-        return sessionList;
+            Long userId = Long.valueOf(claims.getSubject());
+
+            Optional<Session> sessionOptional = sessionRepository.findByTokenAndUserId(token, userId);
+            if (sessionOptional.isEmpty()
+                    || sessionOptional.get().getSessionStatus().equals(SessionStatus.ENDED)) {
+                return new ValidateTokenResponse(null, false, List.of());
+            }
+
+            List<String> roles = extractRoles(claims);
+            return new ValidateTokenResponse(userId, true, roles);
+        } catch (JwtException | NumberFormatException ex) {
+            return new ValidateTokenResponse(null, false, List.of());
+        }
     }
 
+    @SuppressWarnings("unchecked")
+    private List<String> extractRoles(Claims claims) {
+        Object roles = claims.get("roles");
+        if (roles instanceof List<?>) {
+            return ((List<?>) roles).stream().map(String::valueOf).toList();
+        }
+        return List.of();
+    }
+
+    // Used for testing/inspection only; not intended for production exposure.
+    public List<Session> getAllSessions() {
+        return sessionRepository.findAll();
+    }
 }

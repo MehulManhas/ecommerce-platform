@@ -26,8 +26,8 @@ public class ProductControllerTest {
         when(productService.getAllProducts()).thenReturn(productListResponseDto);
 
         mockMvc.perform(get("/products"))
-                .andExpect(status().is(200))
-                .andExpect(content().string(""));
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"productList\":[]}"));
 
     }
 

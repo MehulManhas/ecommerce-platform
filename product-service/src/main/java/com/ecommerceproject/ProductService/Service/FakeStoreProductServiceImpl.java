@@ -8,6 +8,7 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.UUID;
 
 import static com.ecommerceproject.ProductService.Mapper.ProductMapper.fakeStoreProductResponseToProductResponse;
 import static com.ecommerceproject.ProductService.Mapper.ProductMapper.productRequestToFakeStoreProductRequest;
@@ -42,15 +43,11 @@ public class FakeStoreProductServiceImpl implements ProductService{
     }
 
     @Override
-    public ProductResponseDto getProductById(int productId) throws ProductNotFoundException {
-
-        FakeStoreProductResponseDto fakeStoreProductResponseDto = fakeStoreAPIClient.getProductById(productId);
-
-        if(isNull(fakeStoreProductResponseDto)){
-            throw new ProductNotFoundException("Product not found with id : " + productId);
-        }
-
-        return fakeStoreProductResponseToProductResponse(fakeStoreProductResponseDto);
+    public ProductResponseDto getProductById(UUID productId) throws ProductNotFoundException {
+        // FakeStore API addresses products by integer id, which is incompatible
+        // with the UUID-based API. Use the DB-backed "productService" instead.
+        throw new UnsupportedOperationException(
+                "FakeStore API uses integer ids; UUID lookup is not supported by this implementation");
     }
 
     @Override
@@ -67,14 +64,15 @@ public class FakeStoreProductServiceImpl implements ProductService{
     }
 
     @Override
-    public boolean deleteProduct(int productId) {
-        fakeStoreAPIClient.deleteProduct(productId);
-        return true;
+    public boolean deleteProduct(UUID productId) {
+        throw new UnsupportedOperationException(
+                "FakeStore API uses integer ids; UUID delete is not supported by this implementation");
     }
 
     @Override
-    public Product updateProduct(int productId, Product updatedProduct) {
-        return null;
+    public Product updateProduct(UUID productId, Product updatedProduct) throws ProductNotFoundException {
+        throw new UnsupportedOperationException(
+                "FakeStore API uses integer ids; UUID update is not supported by this implementation");
     }
 
     @Override
