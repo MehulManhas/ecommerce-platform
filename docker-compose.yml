@@ -1,7 +1,7 @@
-# Infrastructure for local development.
-# Phase 1 (monorepo migration) ships Postgres only, since the services are not
-# containerised yet. Redis, Kafka and the service containers are added in the
-# "Dockerize + deployment" step.
+# Full local stack: infrastructure + all seven services + gateway.
+#   docker compose up -d --build
+# Host access: Postgres :5432, Redis :6379, Kafka :9092, gateway :8080.
+# Services talk to each other and to Kafka (kafka:29092) over the compose network.
 services:
   postgres:
     image: postgres:16
@@ -31,9 +31,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # Single-node Kafka (KRaft mode, no ZooKeeper). advertised listener is localhost
-  # because the services currently run on the host; Phase 6 adjusts this when the
-  # services move into containers.
+  # Single-node Kafka (KRaft). Two listeners: INTERNAL (kafka:29092) for the
+  # compose services, EXTERNAL (localhost:9092) for clients on the host.
   kafka:
     image: apache/kafka:3.7.0
     container_name: ecommerce-kafka
@@ -42,16 +41,139 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:29093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
+  user-service:
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    container_name: ecommerce-user-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+  product-service:
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    container_name: ecommerce-product-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      user-service:
+        condition: service_started
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    container_name: ecommerce-order-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "9091:9091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: ecommerce-api-gateway
+    environment:
+      USERSERVICE_URI: http://user-service:8081
+      PRODUCTSERVICE_URI: http://product-service:9090
+      ORDERSERVICE_URI: http://order-service:9091
+      PAYMENTSERVICE_URI: http://payment-service:9095
+      INVENTORYSERVICE_URI: http://inventory-service:9094
+    ports:
+      - "8080:8080"
+    depends_on:
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      inventory-service:
+        condition: service_started
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment-service/Dockerfile
+    container_name: ecommerce-payment-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "9095:9095"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      user-service:
+        condition: service_started
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: inventory-service/Dockerfile
+    container_name: ecommerce-inventory-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "9094:9094"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    container_name: ecommerce-notification-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "9093:9093"
+    depends_on:
+      kafka:
+        condition: service_started
+
 volumes:
   pgdata:
-
