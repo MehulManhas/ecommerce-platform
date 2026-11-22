@@ -27,3 +27,7 @@ Thumbs.db
 # Spring Boot devtools restart marker
 .attach_pid*
 
+
+# Build artifacts / patches (not committed)
+*.patch
+frontend.zip
