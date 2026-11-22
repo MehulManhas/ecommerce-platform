@@ -3,10 +3,9 @@ package com.ecommerceproject.UserService.Controller;
 import com.ecommerceproject.UserService.Dto.LogInRequestDto;
 import com.ecommerceproject.UserService.Dto.SignUpRequestDto;
 import com.ecommerceproject.UserService.Dto.UserDto;
-import com.ecommerceproject.UserService.Dto.ValidateTokenRequestDto;
 import com.ecommerceproject.UserService.Model.Session;
-import com.ecommerceproject.UserService.Model.SessionStatus;
 import com.ecommerceproject.UserService.Service.AuthService;
+import com.ecommerceproject.common.dto.ValidateTokenResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -42,9 +41,20 @@ public class AuthController {
 //    public ResponseEntity<>
 
     @GetMapping("/validate")
-    public ResponseEntity<Void> validate(@RequestBody ValidateTokenRequestDto validateTokenRequestDto){
-        SessionStatus sessionStatus = authService.validate(validateTokenRequestDto.getUserId(), validateTokenRequestDto.getToken());
-        return new ResponseEntity<>(HttpStatus.OK);
+    public ResponseEntity<ValidateTokenResponse> validate(@RequestHeader("Authorization") String authorizationHeader){
+        String token = extractBearer(authorizationHeader);
+        ValidateTokenResponse response = authService.validateToken(token);
+        if (!response.isValid()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+        return ResponseEntity.ok(response);
+    }
+
+    private String extractBearer(String header) {
+        if (header != null && header.startsWith("Bearer ")) {
+            return header.substring("Bearer ".length());
+        }
+        return header;
     }
 
     //Below APIs are used for testing purpose only not to be deployed

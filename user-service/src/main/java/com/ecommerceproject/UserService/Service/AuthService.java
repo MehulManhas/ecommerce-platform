@@ -10,6 +10,8 @@ import com.ecommerceproject.UserService.Model.SessionStatus;
 import com.ecommerceproject.UserService.Model.User;
 import com.ecommerceproject.UserService.Repository.SessionRepository;
 import com.ecommerceproject.UserService.Repository.UserRepository;
+import com.ecommerceproject.common.dto.ValidateTokenResponse;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -129,6 +131,43 @@ public class AuthService {
         }
 
         return SessionStatus.ACTIVE;
+    }
+
+    /**
+     * Resolves and verifies a bearer token for cross-service calls. The caller's
+     * id is taken from the verified JWT subject (set at login), so the consumer
+     * only needs to forward the token. Returns valid=false on any failure.
+     */
+    public ValidateTokenResponse validateToken(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(jwtKey)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+
+            Long userId = Long.valueOf(claims.getSubject());
+
+            Optional<Session> sessionOptional = sessionRepository.findByTokenAndUserId(token, userId);
+            if (sessionOptional.isEmpty()
+                    || sessionOptional.get().getSessionStatus().equals(SessionStatus.ENDED)) {
+                return new ValidateTokenResponse(null, false, List.of());
+            }
+
+            List<String> roles = extractRoles(claims);
+            return new ValidateTokenResponse(userId, true, roles);
+        } catch (JwtException | NumberFormatException ex) {
+            return new ValidateTokenResponse(null, false, List.of());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> extractRoles(Claims claims) {
+        Object roles = claims.get("roles");
+        if (roles instanceof List<?>) {
+            return ((List<?>) roles).stream().map(String::valueOf).toList();
+        }
+        return List.of();
     }
 
     // Used for testing/inspection only; not intended for production exposure.

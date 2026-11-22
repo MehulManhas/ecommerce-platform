@@ -27,6 +27,7 @@
 
     <!-- Aggregated modules. New services (common, gateway, order-service) get added here. -->
     <modules>
+        <module>common</module>
         <module>user-service</module>
         <module>product-service</module>
     </modules>
